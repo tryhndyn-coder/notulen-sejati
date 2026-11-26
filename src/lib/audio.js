@@ -5,21 +5,109 @@ export const SAMPLE_RATE = 16000;
 export const CHUNK_SECONDS = 110; // ±3,5 MB per potongan
 export const MAX_FILE_MB = 500;
 
-/** Ubah file audio/video menjadi Float32Array mono 16 kHz. */
-export async function decodeToMono(file) {
+import MP4Box from 'mp4box';
+
+/** Penurun laju sampel bertahap: rata-rata kotak dari laju asal ke 16 kHz. */
+function makeResampler(fromRate, capacity) {
+  const ratio = fromRate / SAMPLE_RATE;
+  let out = new Float32Array(Math.max(capacity, SAMPLE_RATE));
+  let n = 0, sum = 0, cnt = 0, pos = 0, next = ratio;
+  return {
+    push(mono) {
+      for (let i = 0; i < mono.length; i++) {
+        sum += mono[i]; cnt++; pos++;
+        if (pos >= next) {
+          if (n >= out.length) { const g = new Float32Array(out.length * 2); g.set(out); out = g; }
+          out[n++] = sum / cnt; sum = 0; cnt = 0; next += ratio;
+        }
+      }
+    },
+    result() { return out.subarray(0, n); }
+  };
+}
+
+/** Jalur utama untuk M4A/MP4: dibaca bertahap dengan WebCodecs (hemat memori, andal di Windows). */
+async function decodeMp4(file) {
+  if (typeof AudioDecoder === 'undefined') throw new Error('WebCodecs tidak tersedia');
+  const mp4 = MP4Box.createFile();
+  let info = null, mp4err = null;
+  mp4.onReady = i => { info = i; };
+  mp4.onError = e => { mp4err = e; };
+  const STEP = 8 * 1048576;
+  for (let o = 0; o < file.size; o += STEP) {
+    const buf = await file.slice(o, o + STEP).arrayBuffer();
+    buf.fileStart = o;
+    mp4.appendBuffer(buf);
+  }
+  mp4.flush();
+  if (mp4err || !info) throw new Error('Struktur file MP4/M4A tidak terbaca');
+  const track = info.audioTracks?.[0];
+  if (!track) throw new Error('Tidak ada jalur audio di file ini');
+  const trak = mp4.getTrackById(track.id);
+  const entry = trak.mdia.minf.stbl.stsd.entries[0];
+  let description;
+  try { description = entry.esds.esd.descs[0].descs[0].data; } catch { /* bukan AAC */ }
+  const config = { codec: track.codec.startsWith('mp4a') ? track.codec : 'mp4a.40.2', sampleRate: track.audio.sample_rate, numberOfChannels: track.audio.channel_count, ...(description ? { description } : {}) };
+  const ok = await AudioDecoder.isConfigSupported(config).catch(() => ({ supported: false }));
+  if (!ok.supported) throw new Error(`Codec ${config.codec} tidak didukung browser`);
+
+  const duration = info.duration / info.timescale || track.duration / track.timescale || 0;
+  const rs = makeResampler(track.audio.sample_rate, Math.ceil(duration * SAMPLE_RATE) + SAMPLE_RATE);
+  let decErr = null;
+  const dec = new AudioDecoder({
+    output: data => {
+      const ch = data.numberOfChannels, len = data.numberOfFrames;
+      const mono = new Float32Array(len), tmp = new Float32Array(len);
+      for (let c = 0; c < ch; c++) {
+        data.copyTo(tmp, { planeIndex: c, format: 'f32-planar' });
+        for (let i = 0; i < len; i++) mono[i] += tmp[i] / ch;
+      }
+      data.close();
+      rs.push(mono);
+    },
+    error: e => { decErr = e; }
+  });
+  dec.configure(config);
+  const done = new Promise(res => {
+    mp4.onSamples = (id, user, samples) => {
+      for (const s of samples) {
+        dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round(s.cts * 1e6 / s.timescale), duration: Math.round(s.duration * 1e6 / s.timescale), data: s.data }));
+      }
+      if (samples.length && samples[samples.length - 1].number >= track.nb_samples - 1) res();
+    };
+  });
+  mp4.setExtractionOptions(track.id, null, { nbSamples: 500 });
+  mp4.start();
+  await Promise.race([done, new Promise(r => setTimeout(r, 2000))]);
+  await dec.flush();
+  dec.close();
+  if (decErr) throw new Error(`Gagal mendekode audio: ${decErr.message}`);
+  const out = rs.result();
+  if (out.length < SAMPLE_RATE) throw new Error('Audio hasil baca kosong');
+  return out;
+}
+
+/** Jalur cadangan: decodeAudioData (untuk MP3, WAV, dan format lain). */
+async function decodeWebAudio(file) {
   const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   if (!Ctx) throw new Error('Browser ini tidak bisa membaca audio. Gunakan Chrome atau Edge terbaru.');
   const buf = await file.arrayBuffer();
   const ctx = new Ctx(1, 1, SAMPLE_RATE);
-  let audio;
-  try { audio = await ctx.decodeAudioData(buf); }
-  catch { throw new Error('Format rekaman tidak bisa dibaca browser. Coba file M4A atau MP3 (Zoom: "Audio only").'); }
+  const audio = await ctx.decodeAudioData(buf);
   if (audio.sampleRate === SAMPLE_RATE && audio.numberOfChannels === 1) return audio.getChannelData(0);
-  // Campur ke mono dan samakan laju sampel bila browser tidak melakukannya.
   const off = new Ctx(1, Math.ceil(audio.duration * SAMPLE_RATE), SAMPLE_RATE);
   const src = off.createBufferSource(); src.buffer = audio; src.connect(off.destination); src.start();
-  const out = await off.startRendering();
-  return out.getChannelData(0);
+  return (await off.startRendering()).getChannelData(0);
+}
+
+/** Ubah file audio/video menjadi Float32Array mono 16 kHz. */
+export async function decodeToMono(file) {
+  const isMp4 = /\.(m4a|mp4|mov|aac)$/i.test(file.name || '') || /mp4|m4a|quicktime/.test(file.type || '');
+  const errors = [];
+  if (isMp4) { try { return await decodeMp4(file); } catch (e) { errors.push(e.message); } }
+  try { return await decodeWebAudio(file); } catch (e) { errors.push(e?.message || String(e)); }
+  if (errors.some(m => /tidak bisa membaca audio/.test(m))) throw new Error(errors.find(m => /tidak bisa membaca audio/.test(m)));
+  throw new Error(`Rekaman tidak bisa dibaca browser (${errors.join('; ')}). Coba Chrome atau Edge terbaru, atau simpan ulang sebagai MP3.`);
 }
 
 /** Cari titik paling sunyi di sekitar batas potongan supaya kata tidak terpotong. */
