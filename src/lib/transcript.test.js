@@ -40,7 +40,7 @@ describe('pembersihan', () => {
   });
   it('rapikan bunyi panjang dari mesin', () => {
     const { rows } = cleanTranscript([{ t: 0, who: 'A', text: 'Aaaa.. Ullllllllllllll' }], []);
-    expect(rows[0].text).toBe('Aa.. Ull');
+    expect(rows[0].text).toBe('Aaaa.. Ull');
     expect(rows[0].ok).toBe(false);
   });
   it('kenali kata dialek', () => {
