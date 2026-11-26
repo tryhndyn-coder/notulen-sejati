@@ -38,6 +38,11 @@ describe('pembersihan', () => {
     expect(rows[1].text).toContain('Kolaka Timur');
     expect(rows[1].ok).toBe(true);
   });
+  it('rapikan bunyi panjang dari mesin', () => {
+    const { rows } = cleanTranscript([{ t: 0, who: 'A', text: 'Aaaa.. Ullllllllllllll' }], []);
+    expect(rows[0].text).toBe('Aa.. Ull');
+    expect(rows[0].ok).toBe(false);
+  });
   it('kenali kata dialek', () => {
     expect(dialectWords('Torang so sepakat, bisa ji Pak')).toEqual(expect.arrayContaining(['torang', 'so', 'ji']));
   });

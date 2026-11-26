@@ -92,15 +92,14 @@ describe('Notulen Sejati', () => {
     expect(screen.getByText(/1 bagian perlu dicek/)).toBeTruthy();
   });
 
-  it('rekaman besar saat transkripsi aktif memberi pesan jelas lalu contoh', async () => {
+  it('rekaman besar dipotong di browser; browser tanpa dukungan audio memberi pesan jelas', async () => {
     global.fetch = vi.fn(u => json({ summarize: false, transcribe: true }));
     render(<App />);
     await screen.findByText(/Transkripsi aktif/);
     const big = new File([new Uint8Array(5 * 1024 * 1024)], 'rapat.m4a', { type: 'audio/mp4' });
     fireEvent.change(document.querySelector('input[type=file]'), { target: { files: [big] } });
     fireEvent.click(screen.getByText('Buat notulen'));
-    await screen.findByText(/terlalu besar/);
-    await screen.findByText('Contoh', {}, { timeout: 3000 });
+    await screen.findByText(/tidak bisa membaca audio/);
   });
 
   it('mode live: transkrip berjalan lalu notulen final', async () => {

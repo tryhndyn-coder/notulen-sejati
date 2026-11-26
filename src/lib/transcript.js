@@ -124,6 +124,8 @@ export function cleanTranscript(rows, vocab) {
     if (!text) continue;
     if (HALLUCINATIONS.some(re => re.test(text))) { stats.removed++; continue; }
     const flags = [...(r.flags || [])];
+    const stretched = text.replace(/(\p{L})\1{4,}/gu, '$1$1');
+    if (stretched !== text) { flags.push('Ada bunyi panjang yang tidak jelas'); text = stretched; }
     const c = collapseRepeats(text);
     if (c !== text) { stats.collapsed++; flags.push('Ada kata berulang yang dipotong'); text = c; }
     const v = applyVocab(text, vocab); text = v.text; stats.corrected += v.count;
