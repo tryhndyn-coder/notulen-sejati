@@ -106,7 +106,7 @@ function NewMeeting({ cfg, vocab, meeting, setMeeting, update, say }) {
           setBusy({ step: 1 });
           result = await buildMinutes(rows);
         } else {
-          if (file && !cfg?.transcribe) setError(`Rekaman "${file.name}" belum bisa diproses di versi draft ini, karena mesin transkripsi baru aktif setelah aplikasi dipasang di Vercel. Yang tampil di kanan hanya contoh. Untuk sementara, pakai transkrip .vtt dari Zoom di tab "Teks", atau kirim rekamannya di chat untuk ditranskripsi.`);
+          if (file && !cfg?.transcribe) setError(`Rekaman "${file.name}" belum bisa diproses karena transkripsi belum diaktifkan (API key transkripsi belum diisi di pengaturan Vercel). Yang tampil di kanan hanya contoh. Untuk sementara, pakai transkrip .vtt dari Zoom di tab "Teks", atau kirim rekamannya di chat untuk ditranskripsi.`);
           if (file && cfg?.transcribe) setError(`File ${(file.size / 1048576).toFixed(1)} MB terlalu besar untuk diunggah langsung (maksimal ${MAX_UPLOAD_MB} MB). Untuk sementara, unduh transkrip .vtt dari Zoom lalu pakai tab "Transkrip". Di bawah ini contoh hasilnya.`);
           demo = true;
           for (const s of [0, 1, 2]) { setBusy({ step: s }); await new Promise(r => setTimeout(r, 550)); }
@@ -148,7 +148,7 @@ function NewMeeting({ cfg, vocab, meeting, setMeeting, update, say }) {
 
         {mode === 'rekaman' && <div>
           <FileDrop accept="audio/*,video/*,.m4a,.mp4,.mp3,.wav" file={file} onFile={setFile} label="Pilih atau seret rekaman" hint={`MP4, M4A, MP3 · langsung diproses sampai ${MAX_UPLOAD_MB} MB`} />
-          {offlineNote && <p className="warnnote"><b>Belum aktif di versi draft.</b> Rekaman yang dipilih belum diproses, dan yang muncul hanya contoh hasil. Untuk mencoba rapat Anda sendiri, pakai tab <b>Teks</b> dengan file .vtt dari Zoom.</p>}
+          {offlineNote && <p className="warnnote"><b>Transkripsi rekaman belum aktif.</b> Rekaman yang dipilih belum diproses, dan yang muncul hanya contoh hasil. Untuk mencoba rapat Anda sendiri, pakai tab <b>Teks</b> dengan file .vtt dari Zoom.</p>}
         </div>}
 
         {mode === 'transkrip' && <div>
